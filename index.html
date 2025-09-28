@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Avisos Escolares PWA</title>
+    <!-- Configuración de Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Estilos personalizados para la PWA */
+        body { font-family: 'Inter', sans-serif; background-color: #f7f7f7; }
+        .notice-card { transition: transform 0.3s ease-in-out; }
+        .notice-card:hover { transform: translateY(-3px); box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05); }
+        #loading-indicator {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background: #fff;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1000;
+        }
+    </style>
+    <!-- Enlace al Manifiesto (requerido para la instalación PWA). RUTA SIMPLIFICADA -->
+    <link rel="manifest" href="manifest.json">
+</head>
+<body>
+    <!-- Indicador de Carga -->
+    <div id="loading-indicator">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-600"></div>
+    </div>
+
+    <div id="app" class="hidden min-h-screen p-4 sm:p-6 md:p-8 max-w-2xl mx-auto">
+        <!-- Encabezado y Selector de Modo -->
+        <header class="mb-8 flex justify-between items-center border-b pb-4">
+            <h1 class="text-3xl font-extrabold text-indigo-700">Tablero de Avisos</h1>
+            <button id="toggle-admin" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-full text-sm font-semibold hover:bg-gray-300 transition duration-150">
+                Modo Admin
+            </button>
+        </header>
+
+        <!-- Sección de Alumnos: Ver Avisos -->
+        <section id="student-view">
+            <h2 class="text-2xl font-bold mb-4 text-gray-800">Últimos Avisos Publicados</h2>
+            
+            <div id="latest-notice-container" class="mb-8">
+                <h3 class="text-xl font-semibold mb-2 text-indigo-600">Último Aviso</h3>
+                <!-- Aquí se inyecta el aviso más reciente -->
+            </div>
+
+            <h3 class="text-xl font-semibold mb-2 text-indigo-600 border-t pt-4">Historial de Avisos</h3>
+            <div id="notices-list" class="space-y-4">
+                <p id="no-notices" class="text-gray-500 hidden">No hay avisos disponibles todavía.</p>
+                <!-- Aquí se inyecta el resto de avisos -->
+            </div>
+        </section>
+
+        <!-- Sección de Administrador: Añadir Aviso -->
+        <section id="admin-view" class="hidden mt-12 p-6 bg-white rounded-xl shadow-lg border-2 border-indigo-100">
+            <h2 class="text-2xl font-bold mb-6 text-indigo-700">Panel de Administración: Publicar Aviso</h2>
+            
+            <form id="auth-form" class="space-y-4">
+                <div>
+                    <label for="admin-key" class="block text-sm font-medium text-gray-700">Clave de Administrador (Solo tú)</label>
+                    <input type="password" id="admin-key" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500" placeholder="Ingresa tu clave secreta">
+                </div>
+                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition duration-150">
+                    Acceder como Administrador
+                </button>
+                <p id="auth-message" class="text-sm text-red-500"></p>
+            </form>
+
+            <form id="add-notice-form" class="space-y-4 hidden">
+                <p class="text-green-600 font-semibold">¡Acceso de administrador exitoso! Ya puedes publicar.</p>
+                <div>
+                    <label for="title" class="block text-sm font-medium text-gray-700">Título del Aviso</label>
+                    <input type="text" id="title" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                </div>
+                <div>
+                    <label for="content" class="block text-sm font-medium text-gray-700">Contenido del Aviso</label>
+                    <textarea id="content" rows="4" required class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                </div>
+                <button type="submit" class="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150">
+                    Publicar Nuevo Aviso
+                </button>
+                <button type="button" id="logout-admin" class="w-full text-sm text-gray-500 mt-2 hover:text-red-500">Cerrar Sesión Admin</button>
+                <p id="publish-message" class="text-sm text-green-500"></p>
+            </form>
+        </section>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // --- CONSTANTES Y VARIABLES GLOBALES (Requeridas por el Entorno Canvas) ---
+        const ADMIN_SECRET_KEY = "tu_clave_secreta_aqui"; // ¡CAMBIA ESTO!
+        const MAX_RETRIES = 5;
+        const INITIAL_DELAY = 1000;
+        
+        // --- CONFIGURACIÓN DE FIREBASE LOCAL/VERCEL (DEBES REEMPLAZAR ESTOS VALORES) ---
+        // Si ejecutas esto fuera del Canvas, las variables globales no existen.
+        // **IMPORTANTE**: Si vas a probar en Vercel o ya tienes las claves, 
+        // DEBES reemplazar los valores entre comillas (ej. "YOUR_API_KEY") 
+        // con los valores reales de tu proyecto Firebase.
+        const LOCAL_FIREBASE_CONFIG = {
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID", 
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+        // Lógica para usar la configuración de Canvas o la configuración Local
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'avisos-app-local';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' 
+            ? JSON.parse(__firebase_config) 
+            : LOCAL_FIREBASE_CONFIG;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = null;
+        let isAdmin = false;
+
+        // Referencias del DOM
+        const loadingIndicator = document.getElementById('loading-indicator');
+        const appContainer = document.getElementById('app');
+        const noticesList = document.getElementById('notices-list');
+        const latestNoticeContainer = document.getElementById('latest-notice-container');
+        const adminView = document.getElementById('admin-view');
+        const studentView = document.getElementById('student-view');
+        const toggleAdminButton = document.getElementById('toggle-admin');
+        const authForm = document.getElementById('auth-form');
+        const addNoticeForm = document.getElementById('add-notice-form');
+        const authMessage = document.getElementById('auth-message');
+        const publishMessage = document.getElementById('publish-message');
+        const logoutAdminButton = document.getElementById('logout-admin');
+        const noNoticesElement = document.getElementById('no-notices');
+
+        // --- FUNCIONES DE UTILIDAD ---
+
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return 'Fecha desconocida';
+            let date;
+            // Manejo de diferentes formatos de timestamp
+            if (timestamp.toDate) {
+                date = timestamp.toDate();
+            } else if (timestamp._seconds) {
+                date = new Date(timestamp._seconds * 1000);
+            } else if (typeof timestamp === 'number') {
+                date = new Date(timestamp);
+            } else {
+                return 'Fecha desconocida';
+            }
+
+            const options = { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' };
+            return date.toLocaleDateString('es-ES', options);
+        }
+
+        function createNoticeCard(notice, isLatest = false) {
+            const card = document.createElement('div');
+            card.className = `notice-card p-5 rounded-xl shadow-md ${isLatest ? 'bg-indigo-50 border-indigo-300' : 'bg-white border-gray-200'} border`;
+
+            const title = document.createElement('h4');
+            title.className = `text-lg font-bold mb-1 ${isLatest ? 'text-indigo-800' : 'text-gray-800'}`;
+            title.textContent = notice.title;
+
+            const date = document.createElement('p');
+            date.className = `text-xs mb-3 ${isLatest ? 'text-indigo-600' : 'text-gray-500'}`;
+            date.textContent = formatTimestamp(notice.timestamp);
+
+            const content = document.createElement('p');
+            content.className = 'text-gray-700 whitespace-pre-wrap';
+            content.textContent = notice.content;
+
+            card.appendChild(title);
+            card.appendChild(date);
+            card.appendChild(content);
+
+            return card;
+        }
+
+        // --- FIREBASE Y AUTENTICACIÓN ---
+
+        async function initializeFirebase() {
+            try {
+                // --- COMPROBACIÓN CRUCIAL: MODO DE PRUEBA LOCAL SIN CONFIGURACIÓN REAL ---
+                const isLocalPlaceholder = firebaseConfig.projectId === "YOUR_PROJECT_ID";
+                
+                if (isLocalPlaceholder) {
+                    console.warn("ADVERTENCIA: CONFIGURACIÓN DE PRUEBA LOCAL DETECTADA.");
+                    console.warn("La funcionalidad de Firebase está desactivada para evitar el error 'projectId'.");
+                    console.warn("La PWA se ha cargado. La base de datos funcionará al cargar la configuración de Vercel/Canvas.");
+
+                    // Ocultar el indicador de carga y mostrar la app para pruebas de UI/PWA.
+                    loadingIndicator.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+                    
+                    // Mostrar mensaje de aviso en la UI
+                    latestNoticeContainer.innerHTML = `
+                        <p class="text-red-500 font-semibold p-4 border border-red-300 rounded-lg bg-red-50">
+                            🔴 MODO LOCAL: La conexión a la base de datos está inactiva.
+                            Revisa la consola para más detalles.
+                        </p>
+                    `;
+                    noNoticesElement.classList.remove('hidden');
+                    return; 
+                }
+                
+                // Si la configuración no es el placeholder, proceder con la inicialización real
+                
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 1. Manejar la autenticación inicial
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 2. Esperar el cambio de estado de autenticación
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log("Usuario autenticado con ID:", userId);
+                        // Una vez autenticado, iniciar la escucha de avisos
+                        setupNoticesListener();
+                    } else {
+                        console.log("Usuario no autenticado. Usando ID anónimo.");
+                        userId = crypto.randomUUID(); // Fallback ID
+                    }
+                    // Ocultar el indicador de carga una vez que la autenticación esté lista
+                    loadingIndicator.classList.add('hidden');
+                    appContainer.classList.remove('hidden');
+                });
+
+            } catch (error) {
+                console.error("Error al inicializar Firebase o autenticar:", error);
+                loadingIndicator.classList.add('hidden');
+                appContainer.classList.remove('hidden');
+                console.error("Error al cargar la aplicación. Revisa la consola para más detalles.");
+            }
+        }
+
+        // --- LÓGICA DE FIRESTORE: LECTURA EN TIEMPO REAL ---
+
+        function setupNoticesListener() {
+            if (!db) return; // Salir si Firebase no se pudo inicializar
+            
+            // Colección pública: /artifacts/{appId}/public/data/notices
+            const noticesCollectionPath = `artifacts/${appId}/public/data/notices`;
+            const noticesCollection = collection(db, noticesCollectionPath);
+
+            // Consulta: obtener todos los avisos, ordenados por fecha de creación descendente
+            const q = query(noticesCollection, orderBy("timestamp", "desc"));
+
+            // onSnapshot para actualizaciones en tiempo real
+            onSnapshot(q, (snapshot) => {
+                const notices = [];
+                snapshot.forEach((doc) => {
+                    notices.push({ id: doc.id, ...doc.data() });
+                });
+                
+                renderNotices(notices);
+            }, (error) => {
+                console.error("Error al obtener los avisos en tiempo real:", error);
+                console.error("Hubo un error al cargar los avisos. Revisa tu conexión.");
+            });
+        }
+
+        function renderNotices(notices) {
+            noticesList.innerHTML = '';
+            latestNoticeContainer.innerHTML = '';
+
+            if (notices.length === 0) {
+                // Muestra el mensaje de "no hay avisos" si la lista está vacía
+                noNoticesElement.classList.remove('hidden'); 
+                return;
+            }
+
+            // Oculta el mensaje si hay avisos
+            noNoticesElement.classList.add('hidden');
+
+            // 1. Mostrar el Último Aviso
+            const latestNotice = notices[0];
+            latestNoticeContainer.appendChild(createNoticeCard(latestNotice, true));
+
+            // 2. Mostrar el Historial (todos excepto el primero)
+            if (notices.length > 1) {
+                notices.slice(1).forEach(notice => {
+                    noticesList.appendChild(createNoticeCard(notice));
+                });
+            } else {
+                latestNoticeContainer.classList.remove('mb-8');
+                noticesList.innerHTML = '<p class="text-gray-500">Este es el primer aviso publicado.</p>';
+            }
+        }
+
+        // --- LÓGICA DE FIRESTORE: ESCRITURA (ADMIN) ---
+
+        async function addNotice(title, content) {
+            if (!db || !isAdmin) {
+                publishMessage.textContent = "Error: No tienes permisos de administrador o Firebase no está inicializado.";
+                publishMessage.classList.remove('text-green-500');
+                publishMessage.classList.add('text-red-500');
+                return;
+            }
+
+            const noticeData = {
+                title: title,
+                content: content,
+                timestamp: Date.now(),
+                authorId: userId,
+            };
+            
+            const noticesCollectionPath = `artifacts/${appId}/public/data/notices`;
+
+            try {
+                // Función de reintento con backoff exponencial
+                await retryOperation(async () => {
+                    await addDoc(collection(db, noticesCollectionPath), noticeData);
+                }, "publicar aviso");
+
+                publishMessage.textContent = "✅ Aviso publicado con éxito. Se actualizará en tiempo real.";
+                publishMessage.classList.remove('text-red-500');
+                publishMessage.classList.add('text-green-500');
+                addNoticeForm.reset();
+            } catch (error) {
+                console.error("Error al publicar aviso:", error);
+                publishMessage.textContent = `❌ Error al publicar: ${error.message}`;
+                publishMessage.classList.remove('text-green-500');
+                publishMessage.classList.add('text-red-500');
+            }
+        }
+        
+        async function retryOperation(operation, name) {
+            for (let i = 0; i < MAX_RETRIES; i++) {
+                try {
+                    await operation();
+                    return;
+                } catch (error) {
+                    if (i === MAX_RETRIES - 1) throw error;
+                    const delay = INITIAL_DELAY * Math.pow(2, i) + Math.random() * 1000;
+                    console.warn(`Error en ${name}. Reintentando en ${delay / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
+        // --- MANEJO DE VISTAS (ADMIN/ALUMNO) ---
+
+        function setAdminMode(enabled) {
+            isAdmin = enabled;
+            if (enabled) {
+                studentView.classList.add('hidden');
+                adminView.classList.remove('hidden');
+                toggleAdminButton.textContent = "Modo Alumno";
+                authForm.classList.add('hidden');
+                addNoticeForm.classList.remove('hidden');
+                authMessage.textContent = '';
+                
+            } else {
+                studentView.classList.remove('hidden');
+                adminView.classList.add('hidden');
+                toggleAdminButton.textContent = "Modo Admin";
+                authForm.classList.remove('hidden');
+                addNoticeForm.classList.add('hidden');
+                publishMessage.textContent = '';
+            }
+        }
+
+        // --- EVENT LISTENERS ---
+
+        toggleAdminButton.addEventListener('click', () => {
+            if (isAdmin) {
+                setAdminMode(false);
+            } else {
+                adminView.classList.toggle('hidden');
+                studentView.classList.toggle('hidden');
+                toggleAdminButton.textContent = adminView.classList.contains('hidden') ? "Modo Admin" : "Modo Alumno";
+            }
+        });
+
+        authForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const key = document.getElementById('admin-key').value.trim();
+            if (key === ADMIN_SECRET_KEY) {
+                setAdminMode(true);
+            } else {
+                authMessage.textContent = "Clave incorrecta. Inténtalo de nuevo.";
+            }
+        });
+        
+        logoutAdminButton.addEventListener('click', () => {
+            setAdminMode(false);
+        });
+
+        addNoticeForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const title = document.getElementById('title').value.trim();
+            const content = document.getElementById('content').value.trim();
+
+            if (title && content) {
+                publishMessage.textContent = "Publicando...";
+                addNotice(title, content);
+            } else {
+                publishMessage.textContent = "Ambos campos son obligatorios.";
+            }
+        });
+
+        // Inicializar la aplicación
+        initializeFirebase();
+
+        // Registro del Service Worker para PWA
+        if ('serviceWorker' in navigator) {
+            // El path simple ('service-worker.js') funciona si está en la raíz
+            // RUTA SIMPLIFICADA
+            navigator.serviceWorker.register('service-worker.js') 
+                .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
+                .catch(err => console.error('Fallo el registro del Service Worker:', err));
+        }
+        
+    </script>
+</body>
+</html>

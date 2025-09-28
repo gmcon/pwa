@@ -27,6 +27,8 @@
     </style>
     <!-- Enlace al Manifiesto (requerido para la instalación PWA). RUTA SIMPLIFICADA -->
     <link rel="manifest" href="manifest.json">
+    <!-- Enlace para prevenir el error 404 de favicon.ico -->
+    <link rel="icon" type="image/png" href="https://placehold.co/192x192/4f46e5/ffffff?text=A">
 </head>
 <body>
     <!-- Indicador de Carga -->
@@ -105,20 +107,18 @@
         const INITIAL_DELAY = 1000;
         
         // --- CONFIGURACIÓN DE FIREBASE LOCAL/VERCEL (DEBES REEMPLAZAR ESTOS VALORES) ---
-        // Si ejecutas esto fuera del Canvas, las variables globales no existen.
-        // **IMPORTANTE**: Si vas a probar en Vercel o ya tienes las claves, 
-        // DEBES reemplazar los valores entre comillas (ej. "YOUR_API_KEY") 
-        // con los valores reales de tu proyecto Firebase.
+        // Vercel no inyecta variables globales, pero podemos usar variables de entorno (process.env)
+        // para la configuración. Si no existen, usamos los placeholders (que Firebase rechazará).
         const LOCAL_FIREBASE_CONFIG = {
-            apiKey: "YOUR_API_KEY", 
-            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-            projectId: "YOUR_PROJECT_ID", 
-            storageBucket: "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: "YOUR_SENDER_ID",
-            appId: "YOUR_APP_ID"
+            apiKey: import.meta.env.VITE_API_KEY || "YOUR_API_KEY", 
+            authDomain: import.meta.env.VITE_AUTH_DOMAIN || "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: import.meta.env.VITE_PROJECT_ID || "YOUR_PROJECT_ID", 
+            storageBucket: import.meta.env.VITE_STORAGE_BUCKET || "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID || "YOUR_SENDER_ID",
+            appId: import.meta.env.VITE_APP_ID || "YOUR_APP_ID"
         };
 
-        // Lógica para usar la configuración de Canvas o la configuración Local
+        // Lógica para usar la configuración de Canvas o la configuración Local (para Vercel)
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'avisos-app-local';
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
@@ -143,6 +143,11 @@
         const publishMessage = document.getElementById('publish-message');
         const logoutAdminButton = document.getElementById('logout-admin');
         const noNoticesElement = document.getElementById('no-notices');
+        
+        // ** SOLUCIÓN AL BUCLE DE ESPERA: OCULTAR EL CARGADOR INMEDIATAMENTE **
+        // Se ejecuta al inicio, antes de cualquier posible error de Firebase.
+        loadingIndicator.classList.add('hidden');
+        appContainer.classList.remove('hidden');
 
         // --- FUNCIONES DE UTILIDAD ---
 
@@ -191,31 +196,24 @@
 
         async function initializeFirebase() {
             try {
-                // --- COMPROBACIÓN CRUCIAL: MODO DE PRUEBA LOCAL SIN CONFIGURACIÓN REAL ---
-                const isLocalPlaceholder = firebaseConfig.projectId === "YOUR_PROJECT_ID";
+                // Comprobar si la configuración es el placeholder de prueba
+                const isPlaceholderConfig = firebaseConfig.projectId === "YOUR_PROJECT_ID";
                 
-                if (isLocalPlaceholder) {
-                    console.warn("ADVERTENCIA: CONFIGURACIÓN DE PRUEBA LOCAL DETECTADA.");
-                    console.warn("La funcionalidad de Firebase está desactivada para evitar el error 'projectId'.");
-                    console.warn("La PWA se ha cargado. La base de datos funcionará al cargar la configuración de Vercel/Canvas.");
-
-                    // Ocultar el indicador de carga y mostrar la app para pruebas de UI/PWA.
-                    loadingIndicator.classList.add('hidden');
-                    appContainer.classList.remove('hidden');
+                if (isPlaceholderConfig) {
+                    console.warn("ADVERTENCIA: Configuración de Firebase inválida. Conexión a DB desactivada.");
                     
                     // Mostrar mensaje de aviso en la UI
                     latestNoticeContainer.innerHTML = `
                         <p class="text-red-500 font-semibold p-4 border border-red-300 rounded-lg bg-red-50">
-                            🔴 MODO LOCAL: La conexión a la base de datos está inactiva.
-                            Revisa la consola para más detalles.
+                            🔴 MODO DE PRUEBA: La base de datos está inactiva.
+                            Configura las Variables de Entorno de Vercel.
                         </p>
                     `;
                     noNoticesElement.classList.remove('hidden');
                     return; 
                 }
                 
-                // Si la configuración no es el placeholder, proceder con la inicialización real
-                
+                // Inicialización real
                 app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -232,22 +230,22 @@
                     if (user) {
                         userId = user.uid;
                         console.log("Usuario autenticado con ID:", userId);
-                        // Una vez autenticado, iniciar la escucha de avisos
                         setupNoticesListener();
                     } else {
                         console.log("Usuario no autenticado. Usando ID anónimo.");
                         userId = crypto.randomUUID(); // Fallback ID
                     }
-                    // Ocultar el indicador de carga una vez que la autenticación esté lista
-                    loadingIndicator.classList.add('hidden');
-                    appContainer.classList.remove('hidden');
                 });
 
             } catch (error) {
                 console.error("Error al inicializar Firebase o autenticar:", error);
-                loadingIndicator.classList.add('hidden');
-                appContainer.classList.remove('hidden');
-                console.error("Error al cargar la aplicación. Revisa la consola para más detalles.");
+                
+                // Mostrar un mensaje de error claro en la UI
+                latestNoticeContainer.innerHTML = `
+                    <p class="text-red-600 font-bold p-4 border border-red-400 rounded-lg bg-red-100">
+                        ❌ ERROR CRÍTICO: No se pudo conectar a Firebase. Revisa las variables de entorno de Vercel.
+                    </p>
+                `;
             }
         }
 
@@ -282,12 +280,10 @@
             latestNoticeContainer.innerHTML = '';
 
             if (notices.length === 0) {
-                // Muestra el mensaje de "no hay avisos" si la lista está vacía
                 noNoticesElement.classList.remove('hidden'); 
                 return;
             }
 
-            // Oculta el mensaje si hay avisos
             noNoticesElement.classList.add('hidden');
 
             // 1. Mostrar el Último Aviso
@@ -359,6 +355,9 @@
         // --- MANEJO DE VISTAS (ADMIN/ALUMNO) ---
 
         function setAdminMode(enabled) {
+            // Lee la clave de administrador desde el entorno (en Vercel) o el valor local
+            const secretKey = import.meta.env.ADMIN_SECRET_KEY || ADMIN_SECRET_KEY;
+            
             isAdmin = enabled;
             if (enabled) {
                 studentView.classList.add('hidden');
@@ -393,7 +392,10 @@
         authForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const key = document.getElementById('admin-key').value.trim();
-            if (key === ADMIN_SECRET_KEY) {
+            // Compara la clave ingresada con la clave del entorno (o la placeholder si no existe)
+            const secretKey = import.meta.env.ADMIN_SECRET_KEY || ADMIN_SECRET_KEY;
+
+            if (key === secretKey) {
                 setAdminMode(true);
             } else {
                 authMessage.textContent = "Clave incorrecta. Inténtalo de nuevo.";
@@ -422,8 +424,6 @@
 
         // Registro del Service Worker para PWA
         if ('serviceWorker' in navigator) {
-            // El path simple ('service-worker.js') funciona si está en la raíz
-            // RUTA SIMPLIFICADA
             navigator.serviceWorker.register('service-worker.js') 
                 .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
                 .catch(err => console.error('Fallo el registro del Service Worker:', err));

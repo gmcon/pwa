@@ -101,28 +101,28 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, query, orderBy, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         
-        // --- CONSTANTES Y VARIABLES GLOBALES (Requeridas por el Entorno Canvas) ---
-        const ADMIN_SECRET_KEY = "tu_clave_secreta_aqui"; // ¡CAMBIA ESTO!
+        // --- CONSTANTES Y VARIABLES GLOBALES ---
+        // Clave de administrador (debería ser establecida como ENV var en producción)
+        const ADMIN_SECRET_KEY = "tu_clave_secreta_aqui"; 
         const MAX_RETRIES = 5;
         const INITIAL_DELAY = 1000;
         
-        // --- CONFIGURACIÓN DE FIREBASE LOCAL/VERCEL (DEBES REEMPLAZAR ESTOS VALORES) ---
-        // Vercel no inyecta variables globales, pero podemos usar variables de entorno (process.env)
-        // para la configuración. Si no existen, usamos los placeholders (que Firebase rechazará).
-        const LOCAL_FIREBASE_CONFIG = {
-            apiKey: import.meta.env.VITE_API_KEY || "YOUR_API_KEY", 
-            authDomain: import.meta.env.VITE_AUTH_DOMAIN || "YOUR_PROJECT_ID.firebaseapp.com",
-            projectId: import.meta.env.VITE_PROJECT_ID || "YOUR_PROJECT_ID", 
-            storageBucket: import.meta.env.VITE_STORAGE_BUCKET || "YOUR_PROJECT_ID.appspot.com",
-            messagingSenderId: import.meta.env.VITE_MESSAGING_SENDER_ID || "YOUR_SENDER_ID",
-            appId: import.meta.env.VITE_APP_ID || "YOUR_APP_ID"
+        // --- CONFIGURACIÓN DE FIREBASE (Configuración Placeholder) ---
+        // Al no usar un bundler como Vite, no podemos leer VITE_*. Usamos placeholders.
+        const PLACEHOLDER_FIREBASE_CONFIG = {
+            apiKey: "YOUR_API_KEY", 
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID", 
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
         };
-
-        // Lógica para usar la configuración de Canvas o la configuración Local (para Vercel)
+        
+        // Usamos la configuración mágica de Canvas si existe, si no, usamos el placeholder
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'avisos-app-local';
         const firebaseConfig = typeof __firebase_config !== 'undefined' 
             ? JSON.parse(__firebase_config) 
-            : LOCAL_FIREBASE_CONFIG;
+            : PLACEHOLDER_FIREBASE_CONFIG;
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
 
         let app, db, auth;
@@ -143,18 +143,12 @@
         const publishMessage = document.getElementById('publish-message');
         const logoutAdminButton = document.getElementById('logout-admin');
         const noNoticesElement = document.getElementById('no-notices');
-        
-        // ** SOLUCIÓN AL BUCLE DE ESPERA: OCULTAR EL CARGADOR INMEDIATAMENTE **
-        // Se ejecuta al inicio, antes de cualquier posible error de Firebase.
-        loadingIndicator.classList.add('hidden');
-        appContainer.classList.remove('hidden');
 
         // --- FUNCIONES DE UTILIDAD ---
 
         function formatTimestamp(timestamp) {
             if (!timestamp) return 'Fecha desconocida';
             let date;
-            // Manejo de diferentes formatos de timestamp
             if (timestamp.toDate) {
                 date = timestamp.toDate();
             } else if (timestamp._seconds) {
@@ -205,8 +199,7 @@
                     // Mostrar mensaje de aviso en la UI
                     latestNoticeContainer.innerHTML = `
                         <p class="text-red-500 font-semibold p-4 border border-red-300 rounded-lg bg-red-50">
-                            🔴 MODO DE PRUEBA: La base de datos está inactiva.
-                            Configura las Variables de Entorno de Vercel.
+                            🔴 MODO DE PRUEBA: La base de datos está inactiva. Configura una cuenta de Firebase.
                         </p>
                     `;
                     noNoticesElement.classList.remove('hidden');
@@ -243,9 +236,13 @@
                 // Mostrar un mensaje de error claro en la UI
                 latestNoticeContainer.innerHTML = `
                     <p class="text-red-600 font-bold p-4 border border-red-400 rounded-lg bg-red-100">
-                        ❌ ERROR CRÍTICO: No se pudo conectar a Firebase. Revisa las variables de entorno de Vercel.
+                        ❌ ERROR CRÍTICO: No se pudo conectar a Firebase. Revisa las claves de configuración.
                     </p>
                 `;
+            } finally {
+                 // ** SOLUCIÓN FINAL: OCULTAR EL CARGADOR SIEMPRE DESPUÉS DEL INTENTO DE INICIALIZACIÓN **
+                loadingIndicator.classList.add('hidden');
+                appContainer.classList.remove('hidden');
             }
         }
 
@@ -271,7 +268,6 @@
                 renderNotices(notices);
             }, (error) => {
                 console.error("Error al obtener los avisos en tiempo real:", error);
-                console.error("Hubo un error al cargar los avisos. Revisa tu conexión.");
             });
         }
 
@@ -355,8 +351,7 @@
         // --- MANEJO DE VISTAS (ADMIN/ALUMNO) ---
 
         function setAdminMode(enabled) {
-            // Lee la clave de administrador desde el entorno (en Vercel) o el valor local
-            const secretKey = import.meta.env.ADMIN_SECRET_KEY || ADMIN_SECRET_KEY;
+            // Utilizamos la constante ADMIN_SECRET_KEY directamente, ya que no podemos usar env vars en HTML estático.
             
             isAdmin = enabled;
             if (enabled) {
@@ -392,10 +387,8 @@
         authForm.addEventListener('submit', (e) => {
             e.preventDefault();
             const key = document.getElementById('admin-key').value.trim();
-            // Compara la clave ingresada con la clave del entorno (o la placeholder si no existe)
-            const secretKey = import.meta.env.ADMIN_SECRET_KEY || ADMIN_SECRET_KEY;
-
-            if (key === secretKey) {
+            // Compara la clave ingresada con la clave del placeholder (o la real si se usa Canvas)
+            if (key === ADMIN_SECRET_KEY) {
                 setAdminMode(true);
             } else {
                 authMessage.textContent = "Clave incorrecta. Inténtalo de nuevo.";

@@ -412,15 +412,20 @@
             }
         });
 
-        // Inicializar la aplicación
-        initializeFirebase();
+        // ----------------------------------------------------
+        // CORRECCIÓN CRÍTICA: Esperar a que el DOM esté listo
+        // ----------------------------------------------------
+        document.addEventListener('DOMContentLoaded', () => {
+            // Inicializar la aplicación (incluye ocultar el cargador)
+            initializeFirebase();
 
-        // Registro del Service Worker para PWA
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('service-worker.js') 
-                .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
-                .catch(err => console.error('Fallo el registro del Service Worker:', err));
-        }
+            // Registro del Service Worker para PWA
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.register('service-worker.js') 
+                    .then(reg => console.log('Service Worker registrado con éxito:', reg.scope))
+                    .catch(err => console.error('Fallo el registro del Service Worker:', err));
+            }
+        });
         
     </script>
 </body>
